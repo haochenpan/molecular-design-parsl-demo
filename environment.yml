@@ -4,18 +4,16 @@ channels:
   - conda-forge
 dependencies:
 # Core dependencies
-  - python==3.9.*
+  - python==3.11.*
   - jupyterlab
   - ipywidgets
   - pip
 
 # Dependencies from the molecular design app
-  - scikit-learn==0.23.*
-  - matplotlib==3.3.3
-  - rdkit==2021.09.01
-  - py-cpuinfo<6
-  - msgpack-python==1.*
-  - xtb-python==20.2
+  - scikit-learn
+  - matplotlib
+  - rdkit
+  - xtb-python==22.1
   - redis
   - psutil
   - tqdm
@@ -26,4 +24,4 @@ dependencies:
       - parsl
       - jupyterlab-spellchecker
       - ase
-      - colmena>=0.3.2
+      - colmena

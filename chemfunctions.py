@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 from ase.io import read
 from ase.optimize import LBFGSLineSearch
-from rdkit import Chem, DataStructs
+from rdkit import Chem
 from rdkit.Chem import AllChem
 from xtb.ase.calculator import XTB
 from sklearn.base import TransformerMixin, BaseEstimator
@@ -25,7 +25,10 @@ from sklearn.pipeline import Pipeline
 #  Not a great practice, as it will not exit until Python does.
 #  Useful on HPC as it limits the number of times we call `fork`
 #   and we know the nodes where this run will get purged after tasks complete
-n_workers = max(len(os.sched_getaffinity(0)) - 1, 1)  # Get as many threads as we are assigned to
+try:
+    n_workers = max(len(os.sched_getaffinity(0)) - 1, 1)  # Get as many threads as we are assigned to
+except AttributeError:
+    n_workers = max(os.cpu_count() - 1, 1)  # Fallback for macOS (no sched_getaffinity)
 _pool = ProcessPoolExecutor(max_workers=n_workers)
 
 """SIMULATION FUNCTIONS: Quantum chemistry parts of the workflow"""
@@ -127,18 +130,15 @@ def compute_morgan_fingerprints(smiles: str, fingerprint_length: int, fingerprin
     Returns:
       np.array. shape = [hparams, fingerprint_length]. The Morgan fingerprint.
     """
+    from rdkit.Chem import rdFingerprintGenerator
+
     # Parse the molecule
     molecule = Chem.MolFromSmiles(smiles)
 
-    # Compute the fingerprint
-    fingerprint = AllChem.GetMorganFingerprintAsBitVect(
-        molecule, fingerprint_radius, fingerprint_length)
-    arr = np.zeros((1,), dtype=np.bool)
-
-    # ConvertToNumpyArray takes ~ 0.19 ms, while
-    # np.asarray takes ~ 4.69 ms
-    DataStructs.ConvertToNumpyArray(fingerprint, arr)
-    return arr
+    # Compute the fingerprint using the new MorganGenerator API
+    generator = rdFingerprintGenerator.GetMorganGenerator(
+        radius=fingerprint_radius, fpSize=fingerprint_length)
+    return generator.GetFingerprintAsNumPy(molecule).astype(np.bool_)
 
 
 class MorganFingerprintTransformer(BaseEstimator, TransformerMixin):
@@ -163,7 +163,7 @@ class MorganFingerprintTransformer(BaseEstimator, TransformerMixin):
         my_func = partial(compute_morgan_fingerprints,
                           fingerprint_length=self.length,
                           fingerprint_radius=self.radius)
-        fing = _pool.map(my_func, X, chunksize=2048)
+        fing = list(_pool.map(my_func, X, chunksize=2048))
         return np.vstack(fing)
 
 

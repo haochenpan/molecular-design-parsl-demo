@@ -245,7 +245,7 @@ class BatchedThinker(BaseThinker):
         # Start a training task with the current database
         print(f'Starting training. Database size: {len(self.database)}...', end='')
         smiles, ie = zip(*self.database.items())
-        self.queues.send_inputs(smiles, ie, method='train_model', topic='train')
+        self.queues.send_inputs(list(smiles), list(ie), method='train_model', topic='train')
 
         # Update the allocation from the dashboard
         self._update_dashboard('train', 1)
