@@ -1,8 +1,4 @@
-"""Functions used to perform chemistry tasks in the Parsl workflow
-
-While Parsl does offer the ability to run functions defined in a Jupyter notebook,
-we define them here to keep the notebook cleaner   
-"""
+"""Functions used to perform chemistry tasks in the Parsl workflow."""
 import os
 from concurrent.futures import ProcessPoolExecutor
 from functools import partial, update_wrapper
@@ -39,8 +35,7 @@ def generate_initial_xyz(mol_string: str) -> str:
         mol_string: SMILES string
 
     Returns:
-        - InChI string for the molecule
-        - XYZ coordinates for the molecule
+        XYZ coordinates as a string
     """
 
     # Generate 3D coordinates for the molecule
@@ -72,7 +67,6 @@ def _run_in_process(func, *args):
     """
 
     with ProcessPoolExecutor(max_workers=1) as exe:
-        print(args)
         fut = exe.submit(func, *args)
         return fut.result()
 
@@ -119,7 +113,7 @@ compute_vertical.__name__ = 'compute_vertical'
 """MACHINE LEARNING FUNCTIONS: Predicting the output of quantum chemistry"""
 
 
-def compute_morgan_fingerprints(smiles: str, fingerprint_length: int, fingerprint_radius: int):
+def compute_morgan_fingerprints(smiles: str, fingerprint_length: int, fingerprint_radius: int) -> np.ndarray:
     """Get Morgan Fingerprint of a specific SMILES string.
     Adapted from: <https://github.com/google-research/google-research/blob/
     dfac4178ccf521e8d6eae45f7b0a33a6a5b691ee/mol_dqn/chemgraph/dqn/deep_q_networks.py#L750>
@@ -167,7 +161,7 @@ class MorganFingerprintTransformer(BaseEstimator, TransformerMixin):
         return np.vstack(fing)
 
 
-def train_model(smiles: List[str], properties: List[float]):
+def train_model(smiles: List[str], properties: List[float]) -> Pipeline:
     """Train a machine learning model using Morgan Fingerprints.
     
     Args:
@@ -187,7 +181,7 @@ def train_model(smiles: List[str], properties: List[float]):
     return model.fit(smiles, properties)
 
 
-def run_model(model, smiles):
+def run_model(model: Pipeline, smiles: List[str]) -> pd.DataFrame:
     """Run a model on a list of smiles strings
     
     Args:

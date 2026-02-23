@@ -42,7 +42,7 @@ QUEUE_CONFIGS = {
 # Parsl config factory functions
 # ---------------------------------------------------------------------------
 
-def _make_local_parsl_config(n_workers):
+def _make_local_parsl_config(n_workers, **kwargs):
     from parsl.executors import ThreadPoolExecutor
     return Config(
         executors=[
@@ -54,7 +54,7 @@ def _make_local_parsl_config(n_workers):
     )
 
 
-def _make_midway_parsl_config(n_workers):
+def _make_midway_parsl_config(n_workers, account='pi-chard', partition='caslake', walltime='00:15:00'):
     from parsl.addresses import address_by_hostname
     from parsl.executors import HighThroughputExecutor
     from parsl.launchers import SrunLauncher
@@ -83,13 +83,13 @@ def _make_midway_parsl_config(n_workers):
             HighThroughputExecutor(
                 label="midway3_htex",
                 provider=SlurmProvider(
-                    partition="caslake",
-                    account="pi-chard",
+                    partition=partition,
+                    account=account,
                     nodes_per_block=1,
                     init_blocks=1,
                     min_blocks=1,
                     max_blocks=1,
-                    walltime="00:15:00",
+                    walltime=walltime,
                     worker_init=worker_init,
                     exclusive=False,
                     launcher=SrunLauncher(),
@@ -128,18 +128,20 @@ def make_queues(config_name: str, topics: List[str], **kwargs) -> ColmenaQueues:
     return QUEUE_CONFIGS[config_name](topics, **kwargs)
 
 
-def make_parsl_config(config_name: str, n_workers: int) -> Config:
+def make_parsl_config(config_name: str, n_workers: int, **kwargs) -> Config:
     """Create a Parsl Config for the given configuration.
 
     Args:
         config_name: Configuration name (e.g. "local", "midway").
         n_workers: Number of parallel workers.
+        **kwargs: Extra arguments forwarded to the platform factory
+                  (e.g. account, partition, walltime for midway).
     """
     if config_name not in PARSL_CONFIGS:
         raise ValueError(
             f"Unknown config '{config_name}'. Available: {sorted(PARSL_CONFIGS.keys())}"
         )
-    return PARSL_CONFIGS[config_name](n_workers)
+    return PARSL_CONFIGS[config_name](n_workers, **kwargs)
 
 
 def start_task_server(task_server: ParslTaskServer) -> Thread:

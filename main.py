@@ -9,8 +9,7 @@ Usage:
 import argparse
 import logging
 import os
-import time
-from time import perf_counter
+from time import perf_counter, sleep
 
 import pandas as pd
 from colmena.task_server.parsl import ParslTaskServer
@@ -99,6 +98,19 @@ def parse_args():
         '--redis-port', type=int, default=6379,
         help='Redis port (midway config only)',
     )
+    # HPC Slurm overrides (midway config only)
+    parser.add_argument(
+        '--account', type=str, default='pi-chard',
+        help='Slurm account (midway config only)',
+    )
+    parser.add_argument(
+        '--partition', type=str, default='caslake',
+        help='Slurm partition (midway config only)',
+    )
+    parser.add_argument(
+        '--walltime', type=str, default='00:15:00',
+        help='Slurm walltime (midway config only)',
+    )
     return parser.parse_args()
 
 
@@ -124,7 +136,10 @@ def main():
     # Set up Colmena infrastructure
     topics = ['simulate', 'train', 'infer']
     queues = make_queues(args.config, topics=topics, redis_host=args.redis_host, redis_port=args.redis_port)
-    parsl_config = make_parsl_config(args.config, args.n_workers)
+    parsl_config = make_parsl_config(
+        args.config, args.n_workers,
+        account=args.account, partition=args.partition, walltime=args.walltime,
+    )
     task_server = ParslTaskServer(
         methods=[compute_vertical, train_model, run_model],
         queues=queues,
@@ -133,7 +148,7 @@ def main():
 
     # Start task server
     server_thread = start_task_server(task_server)
-    time.sleep(2)
+    sleep(2)
     print('Task server started.')
 
     # Build and run thinker
@@ -152,9 +167,8 @@ def main():
     with open(output_file, 'w') as fp:
         for result in thinker.simulation_results:
             print(result.model_dump_json(), file=fp)
-        if hasattr(thinker, 'learning_results'):
-            for result in thinker.learning_results:
-                print(result.model_dump_json(exclude={'inputs', 'value'}), file=fp)
+        for result in thinker.learning_results:
+            print(result.model_dump_json(exclude={'inputs', 'value'}), file=fp)
     print(f'Saved results to {output_file}')
 
     # Cleanup

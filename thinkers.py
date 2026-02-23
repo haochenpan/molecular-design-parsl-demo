@@ -33,6 +33,7 @@ class RandomThinker(BaseThinker):
         self.n_to_evaluate = n_to_evaluate
         self.database = dict()
         self.simulation_results = []
+        self.learning_results = []
         self.n_submitted = 0
         self.priority_list = list(self.molecule_list)
         shuffle(self.priority_list)
@@ -46,7 +47,7 @@ class RandomThinker(BaseThinker):
             return
         with self.priority_list_lock:
             next_mol = self.priority_list.pop()
-        self.n_submitted += 1
+            self.n_submitted += 1
         self.queues.send_inputs(next_mol, method='compute_vertical')
         print(f'  Submitted: {next_mol}')
 
@@ -93,7 +94,7 @@ class BatchedThinker(BaseThinker):
         self.batch_size = batch_size
         self.n_parallel = n_parallel
 
-        # Ensure inference task chunks are large enough
+        # Split inference into chunks to keep per-task message payloads manageable
         self.inference_tasks = max(
             len(molecule_list) // 20000,
             self.batch_size * 2
@@ -129,8 +130,7 @@ class BatchedThinker(BaseThinker):
         with self.priority_list_lock:
             next_mol = self.priority_list.pop()
             self.already_ran.add(next_mol)
-
-        self.n_submitted += 1
+            self.n_submitted += 1
         self.queues.send_inputs(next_mol, method='compute_vertical', topic='simulate')
         print(f'  Submitted: {next_mol}')
 

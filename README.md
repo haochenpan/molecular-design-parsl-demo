@@ -87,6 +87,9 @@ Results are saved to `run-data/`. Clean up Parsl state between runs with `rm -rf
 | `--output-dir` | `run-data` | Output directory |
 | `--redis-host` | `localhost` | Redis host (midway config only) |
 | `--redis-port` | `6379` | Redis port (midway config only) |
+| `--account` | `pi-chard` | Slurm account (midway config only) |
+| `--partition` | `caslake` | Slurm partition (midway config only) |
+| `--walltime` | `00:15:00` | Slurm walltime (midway config only) |
 
 Increase `--search-count` for larger experiments.  Each XTB simulation takes
 30–130 seconds depending on molecule size and CPU.
@@ -127,7 +130,7 @@ Adds ML steering on top of simulation:
 To add a new platform (e.g. `polaris`), edit [configs.py](configs.py):
 
 1. Add a queue factory: `_make_polaris_queues(topics, **kwargs)`
-2. Add a Parsl config factory: `_make_polaris_parsl_config(n_workers)`
+2. Add a Parsl config factory: `_make_polaris_parsl_config(n_workers, **kwargs)`
 3. Register both in the `QUEUE_CONFIGS` and `PARSL_CONFIGS` dicts
 
 Then run with `--config polaris`.
