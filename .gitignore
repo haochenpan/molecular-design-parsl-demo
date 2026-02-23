@@ -3,4 +3,5 @@
 /__pycache__
 /run-data
 /env
-.vscode/settings.json
+.vscode/
+cmd_parsl.*.sh

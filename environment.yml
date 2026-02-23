@@ -5,23 +5,18 @@ channels:
 dependencies:
 # Core dependencies
   - python==3.11.*
-  - jupyterlab
-  - ipywidgets
   - pip
 
 # Dependencies from the molecular design app
   - scikit-learn
-  - matplotlib
   - rdkit
   - xtb-python==22.1
   - redis
   - psutil
-  - tqdm
 
 # Pip install Parsl and the local functions
   - pip:
       - -e .
       - parsl
-      - jupyterlab-spellchecker
       - ase
       - colmena

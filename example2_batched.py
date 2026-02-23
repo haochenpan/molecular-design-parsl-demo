@@ -20,11 +20,10 @@ import time
 from time import perf_counter
 
 import pandas as pd
-from colmena.queue.python import PipeQueues
 from colmena.task_server.parsl import ParslTaskServer
 
 from chemfunctions import compute_vertical, train_model, run_model
-from configs import make_parsl_config, start_task_server, stop_task_server
+from configs import make_parsl_config, make_queues, start_task_server, stop_task_server
 from thinkers import StandaloneBatchedThinker
 
 # --- Configuration ---
@@ -49,7 +48,7 @@ def main():
     print(f'Search space: {len(search_space)} molecules')
 
     # Set up Colmena
-    queues = PipeQueues(topics=['simulate', 'train', 'infer'], serialization_method='pickle')
+    queues = make_queues(topics=['simulate', 'train', 'infer'])
     task_server = ParslTaskServer(
         methods=[compute_vertical, train_model, run_model],
         queues=queues,

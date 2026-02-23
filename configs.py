@@ -4,6 +4,9 @@ Provides:
   - make_parsl_config: Build a Parsl Config that auto-detects the platform:
       • macOS  → ThreadPoolExecutor  (avoids fork / ZMQ pickling issues)
       • Linux  → HighThroughputExecutor + SlurmProvider  (Midway3 cluster)
+  - make_queues: Build a Colmena queue that auto-detects the platform:
+      • macOS  → PipeQueues  (in-process, no Redis needed)
+      • Linux  → RedisQueues (cross-node communication via Redis)
   - start_task_server / stop_task_server: Lifecycle helpers that work on
     both macOS (thread) and Linux (subprocess).
 """
@@ -11,9 +14,44 @@ Provides:
 import os
 import platform
 from threading import Thread
+from typing import List
 
+from colmena.queue.base import ColmenaQueues
 from colmena.task_server.parsl import ParslTaskServer
 from parsl import Config
+
+
+def make_queues(topics: List[str], redis_host: str = None, redis_port: int = None) -> ColmenaQueues:
+    """Create the appropriate Colmena queue for the current platform.
+
+    macOS:  PipeQueues — in-process Python pipes. No Redis server needed.
+
+    Linux:  RedisQueues — uses a Redis server to communicate between the
+            login node (where the thinker runs) and compute nodes (where
+            Parsl workers execute tasks).  Requires a running Redis server.
+
+    Args:
+        topics: Queue topic names (e.g. ['simulate', 'train', 'infer']).
+        redis_host: Hostname of the Redis server (Linux only).
+                    Defaults to REDIS_HOST env var, or 'localhost'.
+        redis_port: Port of the Redis server (Linux only).
+                    Defaults to REDIS_PORT env var, or 6379.
+    """
+    if platform.system() == 'Darwin':
+        from colmena.queue.python import PipeQueues
+        return PipeQueues(topics=topics, serialization_method='pickle')
+
+    if redis_host is None:
+        redis_host = os.environ.get('REDIS_HOST', 'localhost')
+    if redis_port is None:
+        redis_port = int(os.environ.get('REDIS_PORT', '6379'))
+
+    from colmena.queue.redis import RedisQueues
+    return RedisQueues(
+        hostname=redis_host,
+        port=redis_port,
+        topics=topics,
+    )
 
 
 def make_parsl_config(n_workers: int) -> Config:
@@ -23,8 +61,8 @@ def make_parsl_config(n_workers: int) -> Config:
             This avoids ``spawn``-mode pickling errors and ZMQ fork issues.
 
     Linux:  HighThroughputExecutor backed by SlurmProvider, targeting the
-            Midway3 *caslake* partition.  The active virtualenv (if any) is
-            forwarded to Slurm workers automatically.
+            Midway3 *caslake* partition.  The active conda env or virtualenv
+            is forwarded to Slurm workers automatically.
     """
     if platform.system() == 'Darwin':
         from parsl.executors import ThreadPoolExecutor
@@ -44,14 +82,26 @@ def make_parsl_config(n_workers: int) -> Config:
     from parsl.launchers import SrunLauncher
     from parsl.providers import SlurmProvider
 
-    venv = os.environ.get("VIRTUAL_ENV")
+    # Build worker_init to replicate the login-node environment on compute nodes.
+    # Order matters: module load → activate env → set env vars.
     worker_init_parts = [
+        "module load python/miniforge-25.3.0",
+    ]
+
+    conda_prefix = os.environ.get("CONDA_PREFIX")
+    venv = os.environ.get("VIRTUAL_ENV")
+    if conda_prefix:
+        # Conda prefix env (e.g. --prefix ./env)
+        worker_init_parts.append(f"source activate {conda_prefix}")
+    elif venv:
+        # Standard virtualenv / venv
+        worker_init_parts.append(f"source {venv}/bin/activate")
+
+    worker_init_parts.extend([
         "export TMPDIR=/tmp",
         "export TEMP=/tmp",
         "export TMP=/tmp",
-    ]
-    if venv:
-        worker_init_parts.insert(0, f"source {venv}/bin/activate")
+    ])
     worker_init = "; ".join(worker_init_parts)
 
     return Config(
