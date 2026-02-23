@@ -68,7 +68,7 @@ python main.py --thinker batched --config midway --search-count 8
 redis-cli shutdown
 ```
 
-> **Tip:** Set `REDIS_HOST` and `REDIS_PORT` environment variables to use a
+> **Tip:** Use the `--redis-host` and `--redis-port` CLI flags to use a
 > non-default Redis host/port.
 
 Results are saved to `run-data/`. Clean up Parsl state between runs with `rm -rf runinfo`.
@@ -85,6 +85,8 @@ Results are saved to `run-data/`. Clean up Parsl state between runs with `rm -rf
 | `--batch-size` | 2 | Simulations between retraining (batched only) |
 | `--data-file` | `data/QM9-search.tsv` | Path to search space TSV |
 | `--output-dir` | `run-data` | Output directory |
+| `--redis-host` | `localhost` | Redis host (midway config only) |
+| `--redis-port` | `6379` | Redis port (midway config only) |
 
 Increase `--search-count` for larger experiments.  Each XTB simulation takes
 30–130 seconds depending on molecule size and CPU.

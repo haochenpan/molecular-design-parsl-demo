@@ -28,11 +28,7 @@ def _make_local_queues(topics, **kwargs):
     return PipeQueues(topics=topics, serialization_method='pickle')
 
 
-def _make_midway_queues(topics, redis_host=None, redis_port=None, **kwargs):
-    if redis_host is None:
-        redis_host = os.environ.get('REDIS_HOST', 'localhost')
-    if redis_port is None:
-        redis_port = int(os.environ.get('REDIS_PORT', '6379'))
+def _make_midway_queues(topics, redis_host='localhost', redis_port=6379, **kwargs):
     from colmena.queue.redis import RedisQueues
     return RedisQueues(hostname=redis_host, port=redis_port, topics=topics)
 

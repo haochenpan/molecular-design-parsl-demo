@@ -91,6 +91,14 @@ def parse_args():
         '--batch-size', type=int, default=2,
         help='Simulations between retraining (batched thinker only)',
     )
+    parser.add_argument(
+        '--redis-host', type=str, default='localhost',
+        help='Redis host (midway config only)',
+    )
+    parser.add_argument(
+        '--redis-port', type=int, default=6379,
+        help='Redis port (midway config only)',
+    )
     return parser.parse_args()
 
 
@@ -115,7 +123,7 @@ def main():
 
     # Set up Colmena infrastructure
     topics = ['simulate', 'train', 'infer']
-    queues = make_queues(args.config, topics=topics)
+    queues = make_queues(args.config, topics=topics, redis_host=args.redis_host, redis_port=args.redis_port)
     parsl_config = make_parsl_config(args.config, args.n_workers)
     task_server = ParslTaskServer(
         methods=[compute_vertical, train_model, run_model],
