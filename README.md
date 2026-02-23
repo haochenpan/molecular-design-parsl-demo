@@ -117,7 +117,7 @@ Adds ML steering on top of simulation:
 | File | Purpose |
 |---|---|
 | `main.py` | Unified CLI entry point |
-| `thinkers.py` | `RandomThinker`, `StandaloneBatchedThinker` |
+| `thinkers.py` | `RandomThinker`, `BatchedThinker` |
 | `configs.py` | Named platform configs, `make_parsl_config`, `make_queues` |
 | `chemfunctions.py` | `compute_vertical`, `train_model`, `run_model` |
 | `redis.conf` | Minimal Redis config (no persistence) for HPC runs |
@@ -138,11 +138,12 @@ Then run with `--config polaris`.
 |---|---|---|
 | Executor | `ThreadPoolExecutor` | `HighThroughputExecutor` + `SlurmProvider` |
 | Queue backend | `PipeQueues` (in-process) | `RedisQueues` (cross-node via Redis) |
-| Task server | Thread (avoids fork + ZMQ issues on macOS) | Subprocess |
+| Task server | Daemon thread (unified across platforms) | Daemon thread (unified across platforms) |
 
-> **Why ThreadPoolExecutor on macOS?** macOS defaults to the `spawn`
-> multiprocessing start method, which can't pickle the task server's lock
-> objects.  `ThreadPoolExecutor` avoids multiprocessing entirely.
+> **Why a thread (not a subprocess) for the task server?** macOS defaults
+> to the `spawn` multiprocessing start method, which can't pickle the task
+> server's lock objects.  A daemon thread avoids this and works identically
+> on both macOS and Linux.
 
 > **Why RedisQueues on HPC?** On clusters the thinker runs on the login
 > node while Parsl dispatches work to compute nodes.  `PipeQueues` only works

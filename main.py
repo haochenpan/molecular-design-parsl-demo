@@ -17,7 +17,7 @@ from colmena.task_server.parsl import ParslTaskServer
 
 from chemfunctions import compute_vertical, train_model, run_model
 from configs import make_parsl_config, make_queues, start_task_server, stop_task_server
-from thinkers import RandomThinker, StandaloneBatchedThinker
+from thinkers import RandomThinker, BatchedThinker
 
 
 # ---------------------------------------------------------------------------
@@ -34,7 +34,7 @@ def _build_random_thinker(queues, n_workers, molecule_list, args):
 
 
 def _build_batched_thinker(queues, n_workers, molecule_list, args):
-    return StandaloneBatchedThinker(
+    return BatchedThinker(
         queues=queues,
         n_to_evaluate=args.search_count,
         n_parallel=n_workers,
@@ -159,7 +159,7 @@ def main():
 
     # Cleanup
     queues.send_kill_signal()
-    stop_task_server(task_server, server_thread)
+    stop_task_server(server_thread)
     print('Done.')
 
 

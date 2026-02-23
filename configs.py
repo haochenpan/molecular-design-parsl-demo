@@ -10,7 +10,6 @@ Usage:
 """
 
 import os
-import platform
 from threading import Thread
 from typing import List
 
@@ -143,21 +142,17 @@ def make_parsl_config(config_name: str, n_workers: int) -> Config:
     return PARSL_CONFIGS[config_name](n_workers)
 
 
-def start_task_server(task_server: ParslTaskServer):
-    """Start the task server in a way that works on both macOS and Linux."""
-    if platform.system() == 'Darwin':
-        t = Thread(target=task_server.run, daemon=True)
-        t.start()
-        return t
-    else:
-        task_server.start()
-        return None
+def start_task_server(task_server: ParslTaskServer) -> Thread:
+    """Start the task server in a daemon thread.
+
+    Uses a thread instead of a subprocess so the same code works on macOS
+    (where ``spawn`` multiprocessing cannot pickle the task server) and Linux.
+    """
+    t = Thread(target=task_server.run, daemon=True)
+    t.start()
+    return t
 
 
-def stop_task_server(task_server: ParslTaskServer, server_thread):
-    """Stop the task server cleanly."""
-    if server_thread is not None:
-        server_thread.join(timeout=30)
-    else:
-        task_server.join()
-        print(f'Process exited with {task_server.exitcode} code')
+def stop_task_server(server_thread: Thread):
+    """Wait for the task-server thread to finish."""
+    server_thread.join(timeout=30)

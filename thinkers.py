@@ -33,6 +33,7 @@ class RandomThinker(BaseThinker):
         self.n_to_evaluate = n_to_evaluate
         self.database = dict()
         self.simulation_results = []
+        self.n_submitted = 0
         self.priority_list = list(self.molecule_list)
         shuffle(self.priority_list)
         self.priority_list_lock = Lock()
@@ -40,8 +41,12 @@ class RandomThinker(BaseThinker):
 
     @task_submitter(task_type='simulate', n_slots=1)
     def submit_calc(self):
+        if self.n_submitted >= self.n_to_evaluate:
+            self.done.set()
+            return
         with self.priority_list_lock:
             next_mol = self.priority_list.pop()
+        self.n_submitted += 1
         self.queues.send_inputs(next_mol, method='compute_vertical')
         print(f'  Submitted: {next_mol}')
 
@@ -59,7 +64,7 @@ class RandomThinker(BaseThinker):
         self.simulation_results.append(result)
 
 
-class StandaloneBatchedThinker(BaseThinker):
+class BatchedThinker(BaseThinker):
     """A thinker which uses ML to prioritize which molecules to simulate.
 
     Stripped of Jupyter dashboard dependencies for standalone execution.
@@ -108,18 +113,24 @@ class StandaloneBatchedThinker(BaseThinker):
         self.task_list_ready = Event()
         self.task_list_ready.set()
 
+        self.n_submitted = 0
+
         # Assign all resources to simulation to start with
         self.rec.reallocate(None, 'simulate', n_parallel)
 
     @task_submitter(task_type='simulate', n_slots=1)
     def submit_calc(self):
         """Submit a calculation when resources are available."""
+        if self.n_submitted >= self.n_to_evaluate:
+            self.done.set()
+            return
         self.task_list_ready.wait()
 
         with self.priority_list_lock:
             next_mol = self.priority_list.pop()
             self.already_ran.add(next_mol)
 
+        self.n_submitted += 1
         self.queues.send_inputs(next_mol, method='compute_vertical', topic='simulate')
         print(f'  Submitted: {next_mol}')
 
