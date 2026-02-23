@@ -1,14 +1,12 @@
-"""Parsl configuration helpers for standalone Colmena examples.
+"""Parsl configuration helpers for Colmena molecular design examples.
 
-Provides:
-  - make_parsl_config: Build a Parsl Config that auto-detects the platform:
-      • macOS  → ThreadPoolExecutor  (avoids fork / ZMQ pickling issues)
-      • Linux  → HighThroughputExecutor + SlurmProvider  (Midway3 cluster)
-  - make_queues: Build a Colmena queue that auto-detects the platform:
-      • macOS  → PipeQueues  (in-process, no Redis needed)
-      • Linux  → RedisQueues (cross-node communication via Redis)
-  - start_task_server / stop_task_server: Lifecycle helpers that work on
-    both macOS (thread) and Linux (subprocess).
+Provides named configurations for different platforms:
+  - "local"  → ThreadPoolExecutor + PipeQueues (no Redis needed)
+  - "midway" → HighThroughputExecutor + SlurmProvider + RedisQueues
+
+Usage:
+  queues = make_queues("local", topics=["simulate", "train", "infer"])
+  config = make_parsl_config("local", n_workers=4)
 """
 
 import os
@@ -21,69 +19,52 @@ from colmena.task_server.parsl import ParslTaskServer
 from parsl import Config
 
 
-def make_queues(topics: List[str], redis_host: str = None, redis_port: int = None) -> ColmenaQueues:
-    """Create the appropriate Colmena queue for the current platform.
+# ---------------------------------------------------------------------------
+# Queue factory functions
+# ---------------------------------------------------------------------------
 
-    macOS:  PipeQueues — in-process Python pipes. No Redis server needed.
+def _make_local_queues(topics, **kwargs):
+    from colmena.queue.python import PipeQueues
+    return PipeQueues(topics=topics, serialization_method='pickle')
 
-    Linux:  RedisQueues — uses a Redis server to communicate between the
-            login node (where the thinker runs) and compute nodes (where
-            Parsl workers execute tasks).  Requires a running Redis server.
 
-    Args:
-        topics: Queue topic names (e.g. ['simulate', 'train', 'infer']).
-        redis_host: Hostname of the Redis server (Linux only).
-                    Defaults to REDIS_HOST env var, or 'localhost'.
-        redis_port: Port of the Redis server (Linux only).
-                    Defaults to REDIS_PORT env var, or 6379.
-    """
-    if platform.system() == 'Darwin':
-        from colmena.queue.python import PipeQueues
-        return PipeQueues(topics=topics, serialization_method='pickle')
-
+def _make_midway_queues(topics, redis_host=None, redis_port=None, **kwargs):
     if redis_host is None:
         redis_host = os.environ.get('REDIS_HOST', 'localhost')
     if redis_port is None:
         redis_port = int(os.environ.get('REDIS_PORT', '6379'))
-
     from colmena.queue.redis import RedisQueues
-    return RedisQueues(
-        hostname=redis_host,
-        port=redis_port,
-        topics=topics,
+    return RedisQueues(hostname=redis_host, port=redis_port, topics=topics)
+
+
+QUEUE_CONFIGS = {
+    'local': _make_local_queues,
+    'midway': _make_midway_queues,
+}
+
+
+# ---------------------------------------------------------------------------
+# Parsl config factory functions
+# ---------------------------------------------------------------------------
+
+def _make_local_parsl_config(n_workers):
+    from parsl.executors import ThreadPoolExecutor
+    return Config(
+        executors=[
+            ThreadPoolExecutor(
+                label='local_threads',
+                max_threads=n_workers,
+            )
+        ]
     )
 
 
-def make_parsl_config(n_workers: int) -> Config:
-    """Create a Parsl Config appropriate for the current platform.
-
-    macOS:  ThreadPoolExecutor — runs tasks in-process on threads.
-            This avoids ``spawn``-mode pickling errors and ZMQ fork issues.
-
-    Linux:  HighThroughputExecutor backed by SlurmProvider, targeting the
-            Midway3 *caslake* partition.  The active conda env or virtualenv
-            is forwarded to Slurm workers automatically.
-    """
-    if platform.system() == 'Darwin':
-        from parsl.executors import ThreadPoolExecutor
-
-        return Config(
-            executors=[
-                ThreadPoolExecutor(
-                    label='local_threads',
-                    max_threads=n_workers,
-                )
-            ]
-        )
-
-    # Linux — Midway3 / Slurm
+def _make_midway_parsl_config(n_workers):
     from parsl.addresses import address_by_hostname
     from parsl.executors import HighThroughputExecutor
     from parsl.launchers import SrunLauncher
     from parsl.providers import SlurmProvider
 
-    # Build worker_init to replicate the login-node environment on compute nodes.
-    # Order matters: module load → activate env → set env vars.
     worker_init_parts = [
         "module load python/miniforge-25.3.0",
     ]
@@ -91,10 +72,8 @@ def make_parsl_config(n_workers: int) -> Config:
     conda_prefix = os.environ.get("CONDA_PREFIX")
     venv = os.environ.get("VIRTUAL_ENV")
     if conda_prefix:
-        # Conda prefix env (e.g. --prefix ./env)
         worker_init_parts.append(f"source activate {conda_prefix}")
     elif venv:
-        # Standard virtualenv / venv
         worker_init_parts.append(f"source {venv}/bin/activate")
 
     worker_init_parts.extend([
@@ -126,6 +105,46 @@ def make_parsl_config(n_workers: int) -> Config:
             )
         ]
     )
+
+
+PARSL_CONFIGS = {
+    'local': _make_local_parsl_config,
+    'midway': _make_midway_parsl_config,
+}
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+def make_queues(config_name: str, topics: List[str], **kwargs) -> ColmenaQueues:
+    """Create Colmena queues for the given configuration.
+
+    Args:
+        config_name: Configuration name (e.g. "local", "midway").
+        topics: Queue topic names (e.g. ['simulate', 'train', 'infer']).
+        **kwargs: Extra arguments forwarded to the queue factory
+                  (e.g. redis_host, redis_port for midway).
+    """
+    if config_name not in QUEUE_CONFIGS:
+        raise ValueError(
+            f"Unknown config '{config_name}'. Available: {sorted(QUEUE_CONFIGS.keys())}"
+        )
+    return QUEUE_CONFIGS[config_name](topics, **kwargs)
+
+
+def make_parsl_config(config_name: str, n_workers: int) -> Config:
+    """Create a Parsl Config for the given configuration.
+
+    Args:
+        config_name: Configuration name (e.g. "local", "midway").
+        n_workers: Number of parallel workers.
+    """
+    if config_name not in PARSL_CONFIGS:
+        raise ValueError(
+            f"Unknown config '{config_name}'. Available: {sorted(PARSL_CONFIGS.keys())}"
+        )
+    return PARSL_CONFIGS[config_name](n_workers)
 
 
 def start_task_server(task_server: ParslTaskServer):

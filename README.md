@@ -29,39 +29,38 @@ pip install -e .
 
 ## Running
 
-### macOS (local)
-
-No Redis needed — the scripts use in-process `PipeQueues` automatically.
+All runs go through `main.py` with two required flags:
 
 ```bash
-# Example 1: Random molecule evaluation (~4 min for 4 molecules)
-python example1_random.py
-
-# Example 2: ML-steered batched optimization (~5 min for 8 molecules)
-python example2_batched.py
+python main.py --thinker <name> --config <name>
 ```
 
-### Linux / HPC (Midway)
+### Local (macOS / Linux desktop)
 
-On Linux the scripts use `RedisQueues` so the thinker (login node) can
-communicate with Parsl workers (compute nodes) across the network.
-You must start a Redis server before running the examples.
+No Redis needed — `--config local` uses in-process `PipeQueues`.
+
+```bash
+# Random molecule evaluation (~4 min for 4 molecules)
+python main.py --thinker random --config local
+
+# ML-steered batched optimization (~5 min for 8 molecules)
+python main.py --thinker batched --config local --search-count 8
+```
+
+### HPC (Midway)
+
+On Midway `--config midway` uses `RedisQueues` + `SlurmProvider`.
+You must start a Redis server before running.
 
 **1. Start Redis** (in a separate terminal or background):
 ```bash
 redis-server redis.conf --port 6379 &
 ```
 
-The included `redis.conf` disables persistence (`appendonly no`, `save ''`)
-since we only need Redis as an ephemeral message broker.
-
-**2. Run the script:**
+**2. Run:**
 ```bash
-# Example 1
-python example1_random.py
-
-# Example 2
-python example2_batched.py
+python main.py --thinker random --config midway
+python main.py --thinker batched --config midway --search-count 8
 ```
 
 **3. Stop Redis** when finished:
@@ -69,20 +68,36 @@ python example2_batched.py
 redis-cli shutdown
 ```
 
-> **Tip:** If you want to use a non-default Redis host/port, set the
-> `REDIS_HOST` and `REDIS_PORT` environment variables before running.
+> **Tip:** Set `REDIS_HOST` and `REDIS_PORT` environment variables to use a
+> non-default Redis host/port.
 
 Results are saved to `run-data/`. Clean up Parsl state between runs with `rm -rf runinfo`.
 
-## What Each Script Does
+## CLI Options
 
-### `example1_random.py`
+| Flag | Default | Description |
+|---|---|---|
+| `--thinker` | *(required)* | Strategy: `random` or `batched` |
+| `--config` | *(required)* | Platform config: `local` or `midway` |
+| `--n-workers` | min(4, cpu_count) | Number of parallel workers |
+| `--search-count` | 4 | Molecules to evaluate |
+| `--initial-count` | 4 | Random sims before first ML training (batched only) |
+| `--batch-size` | 2 | Simulations between retraining (batched only) |
+| `--data-file` | `data/QM9-search.tsv` | Path to search space TSV |
+| `--output-dir` | `run-data` | Output directory |
+
+Increase `--search-count` for larger experiments.  Each XTB simulation takes
+30–130 seconds depending on molecule size and CPU.
+
+## Thinker Strategies
+
+### `random`
 
 Picks molecules at random from the QM9 search space and submits XTB quantum
 chemistry calculations (`compute_vertical` — ionization potential) in parallel
-via Colmena + Parsl.  Results are saved to `run-data/random-results.json`.
+via Colmena + Parsl.
 
-### `example2_batched.py`
+### `batched`
 
 Adds ML steering on top of simulation:
 1. Simulates `initial_count` random molecules first.
@@ -91,47 +106,43 @@ Adds ML steering on top of simulation:
 3. Uses the model to re-rank the remaining ~130k molecules, prioritizing
    high-IE candidates.
 4. Repeats training/inference every `batch_size` completed simulations.
-5. Saves results to `run-data/batched-results.json`.
 
-> **Note:** `initial_count` must be ≥ 4 because the KNN model uses
+> **Note:** `--initial-count` must be ≥ 4 because the KNN model uses
 > `n_neighbors=4` and needs at least that many training samples.
-
-## Configuration
-
-| Parameter | `example1_random.py` | `example2_batched.py` |
-|---|---|---|
-| `search_count` | 4 | 8 |
-| `initial_count` | — | 4 |
-| `batch_size` | — | 2 |
-| `n_workers` | min(4, cpu_count) | min(4, cpu_count) |
-
-Increase `search_count` for larger experiments.  Each XTB simulation takes
-30–130 seconds depending on molecule size and CPU.
 
 ## Project Layout
 
 | File | Purpose |
 |---|---|
-| `example1_random.py` | Entry point — random evaluation |
-| `example2_batched.py` | Entry point — ML-steered batched optimization |
+| `main.py` | Unified CLI entry point |
 | `thinkers.py` | `RandomThinker`, `StandaloneBatchedThinker` |
-| `configs.py` | `make_parsl_config`, `make_queues`, `start_task_server`, `stop_task_server` |
+| `configs.py` | Named platform configs, `make_parsl_config`, `make_queues` |
 | `chemfunctions.py` | `compute_vertical`, `train_model`, `run_model` |
 | `redis.conf` | Minimal Redis config (no persistence) for HPC runs |
 
+## Adding a New Config
+
+To add a new platform (e.g. `polaris`), edit [configs.py](configs.py):
+
+1. Add a queue factory: `_make_polaris_queues(topics, **kwargs)`
+2. Add a Parsl config factory: `_make_polaris_parsl_config(n_workers)`
+3. Register both in the `QUEUE_CONFIGS` and `PARSL_CONFIGS` dicts
+
+Then run with `--config polaris`.
+
 ## Cross-Platform Details
 
-| Aspect | macOS | Linux / HPC |
+| Aspect | `local` | `midway` |
 |---|---|---|
 | Executor | `ThreadPoolExecutor` | `HighThroughputExecutor` + `SlurmProvider` |
 | Queue backend | `PipeQueues` (in-process) | `RedisQueues` (cross-node via Redis) |
-| Task server | Thread (avoids fork + ZMQ issues) | Subprocess |
+| Task server | Thread (avoids fork + ZMQ issues on macOS) | Subprocess |
 
 > **Why ThreadPoolExecutor on macOS?** macOS defaults to the `spawn`
 > multiprocessing start method, which can't pickle the task server's lock
 > objects.  `ThreadPoolExecutor` avoids multiprocessing entirely.
 
-> **Why RedisQueues on Linux?** On HPC clusters the thinker runs on the login
+> **Why RedisQueues on HPC?** On clusters the thinker runs on the login
 > node while Parsl dispatches work to compute nodes.  `PipeQueues` only works
 > within a single process — `RedisQueues` provides a network-accessible message
 > broker that bridges this gap.
