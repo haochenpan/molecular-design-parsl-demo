@@ -2,3 +2,5 @@
 /runinfo
 /__pycache__
 /run-data
+/env
+.vscode/settings.json

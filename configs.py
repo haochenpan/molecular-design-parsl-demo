@@ -1,82 +1,98 @@
-"""Configuration used to demonstrate running Parsl on ALCF's Theta supercomputer
-connecting from your local system.
+"""Parsl configuration helpers for standalone Colmena examples.
 
-WARNING: You should probably use FuncX if you are looking for remote access,
-or launch your application from the Theta login node if you want to use Parsl.
-
-Before running, you must open ports on the remote system or provide an SSH tunnel.
-ALCF prefers SSH tunnels, which we open using
-
-```bash
-ssh -R 54928:localhost:54928 -R 54875:localhost:54875 lward@thetalogin6.alcf.anl.gov
-````
-
-This makes it such that processes on thetalogin6 can connect to ports on my local system by
-connecting to the matching ports on that system.
-Processes on remote systems (i.e., compute nodes) cannot access these ports on the login nodes
-due to ALCF's security policies.
-Allowing access to the ports on the login node (thetalogin6) can be accomplished by adding another
-SSH tunnel from one of the MOM node, which lie on the same network as compute nodes.
-
-First log in to thetamom1 from the login node and set up local port forwarding bound to `0.0.0.0`
-so compute nodes that use it to forward requests
-
-```bash
-ssh thetamom1
-ssh -v -N -L 0.0.0.0:54928:localhost:54928 -L 0.0.0.0:54875:localhost:54875 thetalogin6
-```
-
-You now will have secure channels between a Theta compute node and your home computer,
- routed through the Theta login and MOM nodes.
-
-Note that we specify the same service nodes (thetalogin6, thetamom1) throughput the input file.
+Provides:
+  - make_parsl_config: Build a Parsl Config that auto-detects the platform:
+      • macOS  → ThreadPoolExecutor  (avoids fork / ZMQ pickling issues)
+      • Linux  → HighThroughputExecutor + SlurmProvider  (Midway3 cluster)
+  - start_task_server / stop_task_server: Lifecycle helpers that work on
+    both macOS (thread) and Linux (subprocess).
 """
 
-from parsl.executors import HighThroughputExecutor
-from parsl.providers import CobaltProvider
-from parsl.launchers import AprunLauncher
-from parsl.channels import SSHInteractiveLoginChannel
+import os
+import platform
+from threading import Thread
+
+from colmena.task_server.parsl import ParslTaskServer
 from parsl import Config
 
 
-def theta_remote() -> Config:
-    """Configuration where the manager sits on a local machine and you SSH into Theta
+def make_parsl_config(n_workers: int) -> Config:
+    """Create a Parsl Config appropriate for the current platform.
 
-    Returns:
-        Parsl configuration
+    macOS:  ThreadPoolExecutor — runs tasks in-process on threads.
+            This avoids ``spawn``-mode pickling errors and ZMQ fork issues.
+
+    Linux:  HighThroughputExecutor backed by SlurmProvider, targeting the
+            Midway3 *caslake* partition.  The active virtualenv (if any) is
+            forwarded to Slurm workers automatically.
     """
-    # Set a Theta config for using the KNL nodes with 8 workers per node
-    scr_dir = '/lus/theta-fs0/projects/CSC249ADCD08/molecular-design-parsl-demo/parsl-dir'
-    config = Config(
+    if platform.system() == 'Darwin':
+        from parsl.executors import ThreadPoolExecutor
+
+        return Config(
+            executors=[
+                ThreadPoolExecutor(
+                    label='local_threads',
+                    max_threads=n_workers,
+                )
+            ]
+        )
+
+    # Linux — Midway3 / Slurm
+    from parsl.addresses import address_by_hostname
+    from parsl.executors import HighThroughputExecutor
+    from parsl.launchers import SrunLauncher
+    from parsl.providers import SlurmProvider
+
+    venv = os.environ.get("VIRTUAL_ENV")
+    worker_init_parts = [
+        "export TMPDIR=/tmp",
+        "export TEMP=/tmp",
+        "export TMP=/tmp",
+    ]
+    if venv:
+        worker_init_parts.insert(0, f"source {venv}/bin/activate")
+    worker_init = "; ".join(worker_init_parts)
+
+    return Config(
         executors=[
             HighThroughputExecutor(
-                address='thetamom1',  # Workers will connect back to thetalogin6
-                label='knl',
-                max_workers=8,
-                worker_ports=(54928, 54875),  # Hard coded to match up with SSH tunnels
-                # Mark where we can write log files
-                worker_logdir_root=scr_dir,
-                provider=CobaltProvider(
-                    channel=SSHInteractiveLoginChannel(
-                        'thetalogin6.alcf.anl.gov', username='lward',
-                        script_dir=scr_dir
-                    ),
-                    queue='debug-flat-quad',  # Flat has lower utilization
-                    account='redox_adsp',
-                    launcher=AprunLauncher(overrides="-d 64 --cc depth -j 1"),
-                    worker_init='''
-module load miniconda-3
-source activate /lus/theta-fs0/projects/CSC249ADCD08/molecular-design-parsl-demo/env
-which python
-''',
-                    nodes_per_block=8,
-                    init_blocks=0,
-                    min_blocks=0,
+                label="midway3_htex",
+                provider=SlurmProvider(
+                    partition="caslake",
+                    account="pi-chard",
+                    nodes_per_block=1,
+                    init_blocks=1,
+                    min_blocks=1,
                     max_blocks=1,
-                    cmd_timeout=300,
-                    walltime='00:60:00',
-                    scheduler_options='#COBALT --attrs enable_ssh=1'
-                ))
+                    walltime="00:15:00",
+                    worker_init=worker_init,
+                    exclusive=False,
+                    launcher=SrunLauncher(),
+                ),
+                address=address_by_hostname(),
+                worker_debug=True,
+                max_workers_per_node=n_workers,
+            )
         ]
     )
-    return config
+
+
+def start_task_server(task_server: ParslTaskServer):
+    """Start the task server in a way that works on both macOS and Linux."""
+    if platform.system() == 'Darwin':
+        t = Thread(target=task_server.run, daemon=True)
+        t.start()
+        return t
+    else:
+        task_server.start()
+        return None
+
+
+def stop_task_server(task_server: ParslTaskServer, server_thread):
+    """Stop the task server cleanly."""
+    if server_thread is not None:
+        server_thread.join(timeout=30)
+    else:
+        task_server.join()
+        print(f'Process exited with {task_server.exitcode} code')

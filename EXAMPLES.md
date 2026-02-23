@@ -6,9 +6,18 @@ updated for the latest libraries and cross-platform (macOS + Linux) support.
 
 ## Setup
 
+On most systems:
 ```bash
 conda env create -f environment.yml
 conda activate moldesign-demo
+pip install -e .
+```
+
+If you are running on the UChicago RCC (Midway) cluster:
+```bash
+module load python/miniforge-25.3.0
+mamba env create --prefix ./env -f environment.yml
+source activate ./env
 pip install -e .
 ```
 
@@ -56,6 +65,16 @@ Adds ML steering on top of simulation:
 Increase `search_count` for larger experiments. Each XTB simulation takes 30–130 seconds
 depending on molecule size and CPU.
 
+## Project Layout
+
+| File | Purpose |
+|---|---|
+| `example1_random.py` | Entry point — random evaluation |
+| `example2_batched.py` | Entry point — ML-steered batched optimization |
+| `thinkers.py` | `RandomThinker`, `BatchedThinker` (Jupyter), `StandaloneBatchedThinker` |
+| `configs.py` | `make_parsl_config`, `start_task_server`, `stop_task_server` |
+| `chemfunctions.py` | `compute_vertical`, `train_model`, `run_model` |
+
 ## Changes from Original Notebook
 
 ### API / Library Updates
@@ -91,5 +110,6 @@ The original notebook only ran on Linux. These scripts run on **both macOS and L
 | Progress display | `tqdm.notebook` progress bars | Console `print()` statements |
 | Dashboard | `ipywidgets.Output` + HTML | Console `print()` statements |
 | Queue backend | `PipeQueues` | `PipeQueues` (same) |
-| `BatchedThinker` | Imported from `thinkers.py` | Inlined in `example2_batched.py` |
+| Thinker classes | Defined in `thinkers.py` | Imported from `thinkers.py` |
+| Config helpers | Inline | Extracted to `configs.py` |
 | Dependencies | Jupyter, ipywidgets, tqdm | None beyond core libs |
